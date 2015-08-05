@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="UTF-8">
+    <title></title>
+</head>
+<style>
+    canvas {
+        background-image: url('http://i.imgur.com/vKujs7J.png');
+    }
+</style>
+<body>
+<canvas id="myCanvas" width="640" height="480">
+    Your browser does not support canvas, or has javascript disabled.
+</canvas>
+<script type = "text/javascript">
+    //Where I"ll be drawing.
+    var canvas = document.getElementById('myCanvas');
+    //context
+    var context = canvas.getContext('2d');
+    //Size of snowflake image for collision purposes.
+    var snowflakeSize = 14;
+    //Snowflake array.
+    var snowflakesInAir = [];
+    //Max snowflakes that are interactable.
+    var maxInteractableSnowflakes = 10;
+    //Snowflakes in the air
+    var numSnowflakesInAir = 0;
+    //Height of snow on the glacier
+    var snowHeight = 2;
+    //Rate at which snowflakes fall.
+    var snowflakeFallRate = 1;
+    //Accumulate Interval.
+    var accumulateInterval = 10000.0;
+    //Start time of program.
+    var startTime = Date.now();
+    var deltaTime = -1;
+    var lastAccumulate = 0;
+    //Sound? Music?
+    var snowCrunch = new Audio('https://dl.dropboxusercontent.com/u/104174590/snowCrunchwav.wav');
+    //Check if user is on Internet explorer for audio issues.
+    if (window.navigator.userAgent.indexOf('MSIE ') > 0) {
+        // IE 10 or older => return version number
+        snowCrunch.src = 'https://dl.dropboxusercontent.com/u/104174590/snowCrunch.mp3'
+    }
+
+    if (window.navigator.userAgent.indexOf('Trident/')> 0) {
+        // IE 11 (or newer) => return version number
+        snowCrunch.src = 'https://dl.dropboxusercontent.com/u/104174590/snowCrunch.mp3'
+    }
+    //Internet Explorer audio compat.
+    snowCrunch.preload = "auto";
+    //Bins
+    var numOfBins = 5;
+    //Bin Height at the start
+    var binHeight = 50;
+    //Height per bin.
+    var heightPerBin = [];
+    //Bin Width
+    var binWidth = canvas.width / numOfBins;
+    //max per emitter.
+    var maxParticlesPerEmitter = 20;
+    //Array.
+    particles = [];
+    particlePos = [];
+    //Mouse object.
+    var mouse = {};
+    //is the mouse clicked?
+    var isClicked = false;
+    //Offset from cursor.
+    var xOffset = 0;
+    var yOffset = 0;
+    //Snowflakes that have landed.
+    var snowflakesLanded = [];
+    //x Delta of snowflake
+    var snowflakeXDelta = 0.1;
+    //Multiplier of x movement.
+    var snowflakeXMultiplier = 1.15;
+    //Optimized Collision
+    var maxBinHeight = 400;
+    //Bin Height per pixel.
+    //IF this array is not returned with 1:1 canvas to screen ratio it will cause a 'striped' glacier effect!
+    var binHeights = [];
+    //Snowflakes in bins.
+    var snowflakesInBins = [];
+    //Move into bin.
+    var bins = [];
+    //Chooses bin amounts to alter heights by.
+    var resolutionMultiplier = 1;
+    //Snowflake clicked
+    var snowflakeClicked = -1;
+    //Snowflake images.
+    var snowflakeImage = new Image('');
+    snowflakeImage.ready = true;
+    snowflakeImage.src = 'http://i.imgur.com/W0rqcLP.png';
+    //Cloud
+    var cloudImage = new Image();
+    cloudImage.ready = false;
+    //Cloud spawn point.
+    var cloudX = 0;
+    var cloudRight = true;
+    var cloudDelta = 0.05;
+    cloudImage.src = 'http://i.imgur.com/hC12PPj.png';
+    var cloudOverlay = new Image();
+    cloudOverlay.src = 'http://i.imgur.com/P26unDY.png';
+    //Glacier image for bin buildup
+    var glacierImage = new Image();
+    var binStartHeight = 50;
+    glacierImage.ready = true;
+    glacierImage.src = 'http://i.imgur.com/3CMl47w.jpg';
+    //Init Bins.
+    function initializeBins() {
+        for(var i = 0; i < numOfBins; i++) {
+            bins[i] = 0;
+            heightPerBin[i] = binStartHeight;
+        }
+        //1:1 pixel mapping for bins.
+        for(var i = 0; i < canvas.width; i++) {
+            //Fill each bin with integers of data.
+            //binHeights[i] = 0;
+            binHeights[i] = binStartHeight;
+        }
+        resolutionMultiplier = canvas.width / binHeights.length;
+    }
+
+    function initializeCloud() {
+
+    }
+
+    function createParticles(x, y, m) {
+        this.x = x || 0;
+        this.y = y || 0;
+
+        this.radius = 0.45;
+
+        this.vx = -1.5 + Math.random() * 3;
+        this.vy = m * Math.random() * 1.5;
+    }
+
+    function emitParticles() {
+        for(var i = 0; i < particles.length; i++) {
+            context.beginPath();
+            context.fillStyle = "white";
+            if(particles[i].radius > 0) {
+                context.arc(particles[i].x, particles[i].y, particles[i].radius,
+                        Math.PI * 2, 0);
+            }
+            context.fill();
+
+            particles[i].x += particles[i].vx;
+            particles[i].y += particles[i].vy;
+
+            //Make particles die.
+            particles[i].radius = particles[i].radius - 0.05;
+            if(particles[i].radius <= 0) {
+                particles.splice(i, 1, 1);
+            }
+        }
+    }
+
+    function insertParticles() {
+        for(var i = 0; i < maxParticlesPerEmitter; i++) {
+            particles.push(new createParticles(particlePos.x, particlePos.y, 1.5));
+        }
+    }
+    //Add mouse events.
+    canvas.addEventListener("mousemove", trackPosition, true);
+    canvas.addEventListener("mousedown", userClick, true);
+    canvas.addEventListener("mouseup", userUnclick, true);
+    //Track mouse
+    function trackPosition(e) {
+        if(!e) e = window.event;
+
+        mouse = {cursorX: e.clientX, cursorY: e.clientY};
+    }
+
+    function initializeMouse() {
+
+    }
+
+    function userClick(e) {
+        if(!e) e = window.event;
+        mouse = {clientX: e.clientX, clientY: e.clientY, cursorX: e.clientX, cursorY: e.clientY};
+        isClicked = true;
+    }
+
+    function userUnclick() {
+        isClicked = false;
+        snowflakeClicked = -1;
+    }
+
+    //snowflake object
+    //Max left/right sway for snowflakes.
+    //var snowflakeSway = 2;
+    //Init snowflakes into array.
+    function initializeSnowflakes() {
+        for (var i = 0; i < maxInteractableSnowflakes; i++) {
+                var tempSnowflake = new Object();
+                tempSnowflake.x = Math.random() * canvas.width;
+                tempSnowflake.y = -1 * snowflakeSize * 3;
+                tempSnowflake.xVel = 0;
+                tempSnowflake.spawned = true;
+                tempSnowflake.spawnedNext = false;
+                tempSnowflake.yVel = snowflakeFallRate - Math.random() * 0.65;
+                tempSnowflake.increasing = Math.floor(Math.random() * 2);
+                tempSnowflake.emitted = false;
+                //When a snowflake hits the bottom, you cannot pick up.
+                tempSnowflake.unclickable = false;
+                tempSnowflake.sinMultiplier = Math.round(Math.random() * 180) - 90;
+                if (tempSnowflake.sinMultiplier > 0) tempSnowflake.sinUp = true;
+                else {
+                    tempSnowflake.sinUp = false;
+                }
+                if (tempSnowflake.yVel > snowflakeFallRate) {
+                    tempSnowflake.yVel = snowflakeFallRate;
+                }
+                tempSnowflake.inBin = false;
+                snowflakesInAir.push(tempSnowflake);
+                //Y axis will be the same, set to random x axis.
+                numSnowflakesInAir = numSnowflakesInAir + 1;
+        }
+    }
+    //Blackbox.
+    //FLAKES = BINS
+    function accumulate(numOfBins, binHeight, flakes) {
+        //Do stuff.
+    }
+    //Testing blackbox with my own.
+    function dummyAccumulate(numBins, heightOfBins, numFlakes) {
+        //var returnData = [10, 14, 28, 40, 60];
+        for(var i = 0; i < heightOfBins.length; i++) {
+
+                binHeights[i] += 10 + Math.round(Math.random() * 1);
+        }
+        //document.write('NUM IN BINS 1: ' + numFlakes[0] + ' 2: ' + numFlakes[1] + ' 3: ' + numFlakes[2]
+        //+ ' 4: ' + numFlakes[3] + ' 5: ' + numFlakes[4]);
+
+    }
+    //TODO: FIX LONG TERM CRASH, NEED TO ADD TO ARRAY WHERE FIRST EMPTY.
+    function spawnSnowflake() {
+            var tempSnowflake = new Object();
+            tempSnowflake.x = Math.random() * canvas.width;
+            tempSnowflake.y = -1 * snowflakeSize * 3;
+            tempSnowflake.xVel = 0;
+            tempSnowflake.spawned = true;
+            tempSnowflake.spawnedNext = false;
+            tempSnowflake.yVel = snowflakeFallRate - Math.random() * 0.65;
+            tempSnowflake.increasing = Math.floor(Math.random() * 2);
+            tempSnowflake.emitted = false;
+            //When a snowflake hits the bottom, you cannot pick up.
+            tempSnowflake.unclickable = false;
+            tempSnowflake.sinMultiplier = Math.round(Math.random() * 180) - 90;
+            if (tempSnowflake.sinMultiplier > 0) tempSnowflake.sinUp = true;
+            else {
+                tempSnowflake.sinUp = false;
+            }
+            if (tempSnowflake.yVel > snowflakeFallRate) {
+                tempSnowflake.yVel = snowflakeFallRate;
+            }
+            tempSnowflake.inBin = false;
+            snowflakesInAir.push(tempSnowflake);
+            //Y axis will be the same, set to random x axis.
+            numSnowflakesInAir = numSnowflakesInAir + 1;
+    }
+    //Snowflakes have now spawned, now make them fall.
+    //Game Loop.
+    function updateSnowflakes() {
+        //Chooose if snowflake is to spawn!
+        for(var i = 0; i < snowflakesInAir.length; i++) {
+            //Check if user has clicked.
+            //if(Math.random() * 2 > 1.99999) snowflakesInAir[i].spawned = true;
+
+            if (snowflakesInAir[i].spawned) {
+                if (isClicked) {
+                    //Check for collision with snowflake
+                    if (snowflakesInAir[i].x + snowflakeSize * 3 > mouse.clientX &&
+                            snowflakesInAir[i].x < mouse.clientX && snowflakesInAir[i].y < mouse.clientY &&
+                            snowflakesInAir[i].y + snowflakeSize * 3 > mouse.clientY &&
+                            snowflakesInAir[i].unclickable == false) {
+                        // we have a match!!!!!!
+                        snowflakeClicked = i;
+                    }
+                }
+                //Wider than screen
+                if (snowflakesInAir[i].x > canvas.width - (snowflakeSize * 1.5)) {
+                    snowflakesInAir[i].x = canvas.width - (snowflakeSize * 1.5);
+                    snowflakesInAir[i].sinUp = false;
+                    snowflakesInAir[i].sinMultiplier = 0;
+                }
+                //Less than screen.
+                if (snowflakesInAir[i].x < 0) {
+                    snowflakesInAir[i].x = 0;
+                    snowflakesInAir[i].sinUp = true;
+                    snowflakesInAir[i].sinMultiplier = 0;
+                }
+                //falls below screen (can happen if user throws below)
+                if (snowflakesInAir[i].y >= canvas.height) {
+                    snowflakesInAir[i].y = canvas.height - snowflakeSize * 1.5;
+                }
+                if (snowflakesInAir[i].y > canvas.height - maxBinHeight - snowflakeSize * 1.5) {
+                    //Potentially in a bin!
+                    //Check what bin!
+                    if (snowflakesInAir[i].y + (snowflakeImage.height / 2) > canvas.height - (binHeights[Math.round(snowflakesInAir[i].x)])) {
+                        //Its in a bin!
+                        if (i != snowflakeClicked) {
+                            snowflakesInAir[i].unclickable = true;
+                            snowflakesInAir[i].inBin = true;
+
+                            particlePos.y = snowflakesInAir[i].y + snowflakeImage.height / 2;
+                            particlePos.x = snowflakesInAir[i].x + snowflakeImage.width / 2;
+                            //Add particles
+                            if (!snowflakesInAir[i].emitted) {
+                                insertParticles();
+                                snowflakesInAir[i].emitted = true;
+                            }
+                            snowflakesInAir[i].y = canvas.height - (binHeights[Math.round(snowflakesInAir[i].x)]) - (snowflakeImage.height / 2) + 1;
+                            snowflakesInAir[i].xVel = 0;
+                            snowflakesInAir[i].yVel = 0;
+
+                            if (!snowflakesInAir[i].spawnedNext) {
+                                spawnSnowflake();
+                                snowflakesInAir[i].spawnedNext = true;
+                                bins[Math.round(snowflakesInAir[i].x / (canvas.width / numOfBins))]++;
+                            }
+                        }
+                    }
+                }
+                if (snowflakeClicked >= 0) {
+                    snowflakesInAir[snowflakeClicked].y = mouse.cursorY - snowflakeSize * 1.5;
+                    snowflakesInAir[snowflakeClicked].x = mouse.cursorX - snowflakeSize * 1.5;
+                }
+                snowflakesInAir[i].y += snowflakesInAir[i].yVel;
+                if (snowflakesInAir[i].sinMultiplier > 90) {
+                    snowflakesInAir[i].sinUp = false;
+                }
+                if (snowflakesInAir[i].sinMultiplier < -90) {
+                    snowflakesInAir[i].sinUp = true;
+                }
+                if (snowflakesInAir[i].sinUp) {
+                    snowflakesInAir[i].sinMultiplier += Math.random() * snowflakeXDelta;
+                }
+                if (!snowflakesInAir[i].sinUp) {
+                    snowflakesInAir[i].sinMultiplier -= Math.random() * snowflakeXDelta;
+                }
+                snowflakesInAir[i].xVel = Math.sin(snowflakesInAir[i].sinMultiplier) * snowflakeXMultiplier;
+                if (snowflakesInAir[i].unclickable == false) snowflakesInAir[i].x += snowflakesInAir[i].xVel;
+            }
+        }
+    }
+    //Outline screen since CSS could have implications on website.
+    function drawBorder() {
+        context.beginPath();
+        context.moveTo(0,0);
+        context.lineTo(canvas.width, 0);
+        context.stroke();
+        context.moveTo(canvas.width, 0);
+        context.lineTo(canvas.width, canvas.height);
+        context.stroke();
+        context.moveTo(canvas.width, canvas.height);
+        context.lineTo(0, canvas.height);
+        context.stroke();
+        context.moveTo(0, canvas.height);
+        context.lineTo(0, 0);
+        context.stroke();
+        context.closePath();
+    }
+    //Draw the bins on the screen.
+    function drawBins() {
+        //Draw sides of bins.
+        resolutionMultiplier = canvas.width / (binHeights.length);
+        for(var i = 0; i < (binHeights.length); i++)
+        {
+            if(binHeights[i] > maxBinHeight) {binHeights[i] = maxBinHeight;}
+            context.drawImage(glacierImage, 0, 0, Math.round(resolutionMultiplier * i) + 1, Math.round(binHeights[i]),
+                Math.round(i * resolutionMultiplier) + 1, Math.round(canvas.height - Math.round(binHeights[i])), Math.round(resolutionMultiplier),
+                    binHeights[i]);
+            //Draw top pixel black.
+            context.beginPath();
+            context.fillStyle = "white";
+            context.fillRect(Math.round(i * resolutionMultiplier), Math.round(canvas.height - binHeights[i]), 1,
+                    Math.round(snowHeight));
+            //Put in here to avoid another loop. Should be in update.
+
+        }
+
+        context.beginPath();
+        for(var i = 1; i < numOfBins; i++) {
+            context.moveTo(i * binWidth, canvas.height);
+            context.lineTo((i * binWidth), canvas.height - heightPerBin[i]);
+            context.stroke();
+        }
+        context.stroke();
+        context.closePath();
+    }
+    //Draw the snowflakes on the screen.
+    function drawSnowflakes() {
+        for(var i = 0; i < snowflakesInAir.length; i++) {
+            //Failsafe
+            if(snowflakesInAir[i].x > canvas.width || snowflakesInAir[i].y > canvas.height) {
+                i++;
+            }
+                context.drawImage(snowflakeImage, snowflakesInAir[i].x, snowflakesInAir[i].y);
+        }
+    }
+
+    function drawClouds() {
+        if(cloudRight) { cloudX += cloudDelta;}
+        if(cloudX > canvas.width) {cloudRight = false;}
+        if(!cloudRight) {cloudX -= cloudDelta;}
+        if(cloudX < 0) {cloudRight = true;}
+        context.drawImage(cloudOverlay,cloudX, 0);
+        context.drawImage(cloudImage, 0, 0);
+        context.drawImage(cloudOverlay, Math.round(cloudX - canvas.width / 2), 0);
+        context.drawImage(cloudOverlay, Math.round(cloudX + canvas.width / 2), 0);
+    }
+
+    function clearLandedSnowflakes() {
+        for(var i = 0; i < snowflakesInAir.length; i++) {
+            if(snowflakesInAir[i].inBin || snowflakesInAir[i].unclickable) {
+                //Delete unnecessary flakes.
+                snowflakesInAir.splice(i, 1, 1);
+                bins[Math.round(snowflakesInAir[i].x / (canvas.width / numOfBins))]--;
+            }
+        }
+    }
+
+    function updateBins() {
+        //TODO: Add real Accumulate!
+        if ((deltaTime - startTime) > accumulateInterval) {
+            snowCrunch.play();
+            //ACCUMULATE WOULD GO HERE!
+            //@param - numofBins - number of bins in the program.
+            //@param - binHeights - height of each bin per pixel.
+            //@param - bins - Number of flakes in each bin. ie bins[0] = flakes in first bin on the left.
+            //accumulate(numOfBins, binHeights, bins);
+            dummyAccumulate(numOfBins, binHeights, bins);
+            clearLandedSnowflakes();
+            //Emit particles to cover up transition!
+            for (var i = 0; i < binHeights.length; i += 8) {
+                particlePos.y = canvas.height - binHeights[i];
+                particlePos.x = i * resolutionMultiplier;
+                //Add particles
+                insertParticles();
+                if (binHeights[i] > maxBinHeight)
+                    binHeights[i] = maxBinHeight;
+            }
+            //Get newest bin height.
+            //THIS SHOULD BE IN ACCUMULATE BUT NO Gaurentee DUE TO EXTERNAL FUNCTION.
+            for(var i = 0; i < binHeights.length; i++) {
+                if(heightPerBin[Math.round(i / numOfBins)] < binHeights[i]) {
+                    heightPerBin[Math.round(i / numOfBins)] = binHeights[i];
+                }
+            }
+            startTime = Date.now();
+        }
+    }
+    //Framerate based loop. Primitive. Should be request animation.
+    function initialize() {
+        //Set Interval for accumulate function.
+        initializeMouse();
+        initializeBins();
+        initializeSnowflakes();
+    }
+
+
+    function updateGame() {
+        updateBins();
+        updateSnowflakes();
+    }
+
+    function drawGame() {
+        //This is done second to last.
+        drawBins();
+        drawSnowflakes();
+        emitParticles();
+        drawClouds();
+        //This is done last.
+        drawBorder();
+    }
+    //Initialize game subsystems.
+    initialize();
+
+    var gameLoop = function() {
+        //Update game before drawing new frame.
+        deltaTime = Date.now();
+        updateGame();
+        //Clear before drawing
+        context.clearRect(0,0,canvas.width, canvas.height);
+        drawGame();
+    }
+
+    var animateFrame = window.requestAnimationFrame ||
+            window.webkitRequestAnimationFrame ||
+            window.mozRequestAnimationFrame    ||
+            window.oRequestAnimationFrame      ||
+            window.msRequestAnimationFrame     ||
+            null ;
+    if ( animateFrame !== null ) {
+        var recursiveAnimation = function () {
+            gameLoop();
+            animateFrame(recursiveAnimation, canvas);
+
+        };
+        //Start loopin like Looper
+        animateFrame(recursiveAnimation, canvas);
+    }
+    else {
+        setInterval(gameLoop, 1000.0 / 60.0);
+    }
+
+</script>
+</body>
+</html>
